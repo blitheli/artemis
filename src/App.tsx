@@ -1,13 +1,31 @@
 import { Canvas } from '@react-three/fiber'
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { FlightScene, type CameraViewMode } from './components/FlightScene'
 import { MissionHUD } from './components/MissionHUD'
+import { formatMissionClock, formatUtcFromMs } from './data/artemis-ii'
+import {
+  progressToUnixMs,
+  telemetryAtProgress,
+  useEphemeris,
+} from './hooks/useEphemeris'
 import './index.css'
 
 function App() {
+  const ephemeris = useEphemeris()
   const [progress, setProgress] = useState(0.12)
   const [playing, setPlaying] = useState(false)
   const [viewMode, setViewMode] = useState<CameraViewMode>('earth')
+
+  const telemetry = useMemo(
+    () => telemetryAtProgress(ephemeris, progress),
+    [ephemeris, progress],
+  )
+  const utcMs = useMemo(
+    () => progressToUnixMs(ephemeris, progress),
+    [ephemeris, progress],
+  )
+  const clockLabel =
+    utcMs !== null ? `UTC ${formatUtcFromMs(utcMs)}` : formatMissionClock(progress)
 
   useEffect(() => {
     if (!playing) return
@@ -26,7 +44,7 @@ function App() {
         style={{ width: '100vw', height: '100vh', display: 'block' }}
       >
         <Suspense fallback={null}>
-          <FlightScene progress={progress} viewMode={viewMode} />
+          <FlightScene progress={progress} viewMode={viewMode} ephemeris={ephemeris} />
         </Suspense>
       </Canvas>
       <MissionHUD
@@ -36,6 +54,10 @@ function App() {
         onViewModeChange={setViewMode}
         onProgressChange={setProgress}
         onTogglePlay={() => setPlaying((v) => !v)}
+        ephemerisStatus={ephemeris.status}
+        ephemerisError={ephemeris.errorMessage}
+        clockLabel={clockLabel}
+        telemetry={telemetry}
       />
     </div>
   )

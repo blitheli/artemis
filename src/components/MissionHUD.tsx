@@ -1,9 +1,15 @@
 import {
-  formatMissionClock,
   getPhaseAt,
   MISSION_PHASES,
   NASA_ARTEMIS_II_MISSION_URL,
+  ORION_GLB_SOURCE_NOTE,
 } from '../data/artemis-ii'
+import type { MissionTelemetry } from '../data/jpl-horizons'
+import {
+  formatKm,
+  formatSpeedKms,
+  type EphemerisStatus,
+} from '../hooks/useEphemeris'
 import type { CameraViewMode } from './FlightScene'
 
 type MissionHUDProps = {
@@ -13,6 +19,10 @@ type MissionHUDProps = {
   onViewModeChange: (m: CameraViewMode) => void
   onProgressChange: (v: number) => void
   onTogglePlay: () => void
+  ephemerisStatus: EphemerisStatus
+  ephemerisError: string | null
+  clockLabel: string
+  telemetry: MissionTelemetry | null
 }
 
 export function MissionHUD({
@@ -22,6 +32,10 @@ export function MissionHUD({
   onViewModeChange,
   onProgressChange,
   onTogglePlay,
+  ephemerisStatus,
+  ephemerisError,
+  clockLabel,
+  telemetry,
 }: MissionHUDProps) {
   const phase = getPhaseAt(progress)
 
@@ -31,7 +45,17 @@ export function MissionHUD({
         <div className="hud-badge">NASA · ARTEMIS II</div>
         <h1 className="hud-title">猎户座绕月飞行示意</h1>
         <p className="hud-sub">
-          Orion 载人绕月任务 · 三维轨迹为教学示意，非精密星历。任务与数据参见{' '}
+          Orion 载人绕月任务 · 轨道为 JPL{' '}
+          <a
+            className="hud-link"
+            href="https://ssd.jpl.nasa.gov/horizons/"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Horizons
+          </a>{' '}
+          星历（航天器 COMMAND <code className="hud-code">-1024</code>
+          ）；任务说明见{' '}
           <a
             className="hud-link"
             href={NASA_ARTEMIS_II_MISSION_URL}
@@ -40,7 +64,7 @@ export function MissionHUD({
           >
             NASA Artemis II
           </a>
-          ；猎户座舱体 STL 与地月纹理来自 NASA-3D-Resources（GitHub）。
+          。{ORION_GLB_SOURCE_NOTE} 地月纹理来自 NASA-3D-Resources。
         </p>
         <div className="hud-view-bar" role="group" aria-label="视角切换">
           {(
@@ -63,10 +87,41 @@ export function MissionHUD({
       </header>
 
       <section className="hud-panel" aria-live="polite">
+        <div className="hud-eph-status" data-status={ephemerisStatus}>
+          {ephemerisStatus === 'loading' && '正在从 JPL Horizons 加载星历…'}
+          {ephemerisStatus === 'ready' && '星历已加载（地心黄道 J2000，几何矢量）'}
+          {ephemerisStatus === 'error' &&
+            `星历加载失败，已回退示意轨道：${ephemerisError ?? '未知错误'}`}
+          {ephemerisStatus === 'demo' && '示意模式'}
+        </div>
         <div className="hud-phase-label">{phase.name}</div>
         <div className="hud-phase-en">{phase.nameEn}</div>
         <p className="hud-desc">{phase.summary}</p>
-        <div className="hud-clock">{formatMissionClock(progress)}</div>
+        <div className="hud-clock">{clockLabel}</div>
+        {telemetry && (
+          <dl className="hud-telemetry">
+            <div>
+              <dt>距地球</dt>
+              <dd>{formatKm(telemetry.distEarthKm)}</dd>
+            </div>
+            <div>
+              <dt>距月球</dt>
+              <dd>{formatKm(telemetry.distMoonKm)}</dd>
+            </div>
+            <div>
+              <dt>地球绕日速度</dt>
+              <dd>{formatSpeedKms(telemetry.earthHelioSpeedKms)}</dd>
+            </div>
+            <div>
+              <dt>月球相对地心速度</dt>
+              <dd>{formatSpeedKms(telemetry.moonGeocentricSpeedKms)}</dd>
+            </div>
+            <div>
+              <dt>航天器相对地心速度</dt>
+              <dd>{formatSpeedKms(telemetry.spacecraftGeocentricSpeedKms)}</dd>
+            </div>
+          </dl>
+        )}
       </section>
 
       <footer className="hud-controls">

@@ -2,7 +2,7 @@ import * as THREE from 'three'
 
 /**
  * NASA 公开资源（GitHub 镜像 NASA-3D-Resources）与 Artemis II 任务信息。
- * 本页轨迹仍为示意 Catmull-Rom 曲线；精密星历见 NASA 任务页与 JPL Horizons 等工具。
+ * 默认轨迹来自 JPL Horizons（航天器 -1024）；加载失败时回退为内置示意 Catmull-Rom。
  */
 export const NASA_ARTEMIS_II_MISSION_URL =
   'https://www.nasa.gov/humans-in-space/artemis-ii/'
@@ -17,6 +17,28 @@ export const NASA_EARTH_TEXTURE_URL =
 export const NASA_MOON_TEXTURE_URL =
   'https://raw.githubusercontent.com/nasa/NASA-3D-Resources/master/Images%20and%20Textures/Moon/Moon.jpg'
 
+/** 本地托管的 Orion GLB（源自社区 Artemis 可视化项目，非 NASA 官方 GLB） */
+export const ORION_GLB_URL = '/models/orion.glb'
+
+/** 来源说明（NASA 官方 3D 库目前主要为 Orion 的 STL） */
+export const ORION_GLB_SOURCE_NOTE =
+  'GLB 模型来自开源项目 artemis-viewer（GitHub: iandees/artemis-viewer）；NASA-3D-Resources 提供 STL 猎户座舱体。'
+
+/** JPL Horizons 目标编号：https://ssd.jpl.nasa.gov/horizons/ */
+export const HORIZONS_ARTEMIS_II_SPACECRAFT = '-1024'
+export const HORIZONS_MOON = '301'
+export const HORIZONS_EARTH = '399'
+export const HORIZONS_SOLAR_SYSTEM_BARYCENTER = '500@0'
+
+/** 物理常数（km）— 用于地月显示半径与 km→场景单位换算 */
+export const EARTH_RADIUS_KM = 6378.137
+export const MOON_RADIUS_KM = 1737.4
+
+export const EARTH_RADIUS = 2
+export const MOON_RADIUS = (MOON_RADIUS_KM / EARTH_RADIUS_KM) * EARTH_RADIUS
+/** 无星历时的月球占位位置（示意） */
+export const MOON_POSITION = new THREE.Vector3(22, 0, 0)
+
 /** 任务阶段（时间为归一化 0–1，用于演示时间轴，非真实秒级） */
 export type MissionPhase = {
   id: string
@@ -27,10 +49,10 @@ export type MissionPhase = {
   summary: string
 }
 
-export const EARTH_RADIUS = 2
-export const MOON_RADIUS = 0.55
-/** 地心为原点时月球中心位置（示意比例，非真实 AU） */
-export const MOON_POSITION = new THREE.Vector3(22, 0, 0)
+/** 地心 J2000 黄道 km → 场景单位（地心为原点，地球半径为 EARTH_RADIUS） */
+export function kmToSceneScale(): number {
+  return EARTH_RADIUS / EARTH_RADIUS_KM
+}
 
 export const MISSION_PHASES: MissionPhase[] = [
   {
@@ -128,4 +150,17 @@ export function formatMissionClock(t: number): string {
   const h = Math.floor(totalHours % 24)
   const m = Math.floor((totalHours % 1) * 60)
   return `T+ ${d}d ${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`
+}
+
+export function formatUtcFromMs(ms: number): string {
+  try {
+    return new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'UTC',
+      dateStyle: 'medium',
+      timeStyle: 'medium',
+      hour12: false,
+    }).format(new Date(ms))
+  } catch {
+    return new Date(ms).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
+  }
 }

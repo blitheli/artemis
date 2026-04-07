@@ -1,31 +1,26 @@
-import {
-  forwardRef,
-  Suspense,
-  useImperativeHandle,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-} from 'react'
+import { forwardRef, Suspense, useImperativeHandle, useLayoutEffect, useMemo, useRef } from 'react'
 import type { RefObject } from 'react'
 import { useFrame, useLoader, useThree } from '@react-three/fiber'
-import { Line, OrbitControls, Stars, useTexture, PerspectiveCamera } from '@react-three/drei'
+import { Line, OrbitControls, Stars, useGLTF, useTexture, PerspectiveCamera } from '@react-three/drei'
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import * as THREE from 'three'
 import {
-  createTrajectoryCurve,
   EARTH_RADIUS,
-  MOON_POSITION,
   MOON_RADIUS,
   NASA_EARTH_TEXTURE_URL,
   NASA_MOON_TEXTURE_URL,
   NASA_ORION_STL_URL,
+  ORION_GLB_URL,
 } from '../data/artemis-ii'
+import type { EphemerisState } from '../hooks/useEphemeris'
+import { moonScenePosition } from '../hooks/useEphemeris'
 
 export type CameraViewMode = 'earth' | 'moon' | 'spacecraft'
 
 type FlightSceneProps = {
   progress: number
   viewMode: CameraViewMode
+  ephemeris: EphemerisState
 }
 
 function EarthBody() {
@@ -41,26 +36,35 @@ function EarthBody() {
   )
 }
 
-function MoonBody() {
+function MoonBody({
+  ephemeris,
+  progress,
+}: {
+  ephemeris: EphemerisState
+  progress: number
+}) {
   const map = useTexture(NASA_MOON_TEXTURE_URL, (tex) => {
     tex.colorSpace = THREE.SRGBColorSpace
     tex.anisotropy = 8
   })
+  const meshRef = useRef<THREE.Mesh>(null)
+
+  useFrame(() => {
+    if (!meshRef.current) return
+    const p = moonScenePosition(ephemeris, progress)
+    meshRef.current.position.copy(p)
+  })
+
   return (
-    <mesh position={MOON_POSITION}>
+    <mesh ref={meshRef}>
       <sphereGeometry args={[MOON_RADIUS, 48, 48]} />
       <meshStandardMaterial map={map} roughness={0.95} metalness={0} />
     </mesh>
   )
 }
 
-const OrionSpacecraft = forwardRef<THREE.Group, { progress: number }>(
-  function OrionSpacecraft({ progress }, ref) {
-  const group = useRef<THREE.Group>(null)
-  useImperativeHandle(ref, () => group.current!, [])
-  const curve = useMemo(() => createTrajectoryCurve(), [])
+function OrionStlMesh() {
   const geom = useLoader(STLLoader, NASA_ORION_STL_URL)
-
   const { scaledGeometry, scale } = useMemo(() => {
     const g = geom.clone()
     g.computeVertexNormals()
@@ -73,6 +77,42 @@ const OrionSpacecraft = forwardRef<THREE.Group, { progress: number }>(
     return { scaledGeometry: g, scale: s }
   }, [geom])
 
+  return (
+    <mesh geometry={scaledGeometry} scale={[scale, scale, scale]} rotation={[Math.PI / 2, 0, 0]}>
+      <meshStandardMaterial
+        color="#c8d4e0"
+        metalness={0.55}
+        roughness={0.42}
+        emissive="#1a3048"
+        emissiveIntensity={0.2}
+      />
+    </mesh>
+  )
+}
+
+function OrionGlbRoot() {
+  const gltf = useGLTF(ORION_GLB_URL)
+  const root = useMemo(() => {
+    const obj = gltf.scene.clone(true)
+    const box = new THREE.Box3().setFromObject(obj)
+    const size = new THREE.Vector3()
+    box.getSize(size)
+    const maxDim = Math.max(size.x, size.y, size.z, 1e-6)
+    const s = 0.5 / maxDim
+    obj.scale.setScalar(s)
+    obj.rotation.set(0, Math.PI, 0)
+    return obj
+  }, [gltf])
+  return <primitive object={root} />
+}
+
+const OrionSpacecraft = forwardRef<
+  THREE.Group,
+  { progress: number; curve: THREE.CatmullRomCurve3; useStlFallback: boolean }
+>(function OrionSpacecraft({ progress, curve, useStlFallback }, ref) {
+  const group = useRef<THREE.Group>(null)
+  useImperativeHandle(ref, () => group.current!, [])
+
   useFrame(() => {
     if (!group.current) return
     const t = THREE.MathUtils.clamp(progress, 0, 1)
@@ -84,44 +124,33 @@ const OrionSpacecraft = forwardRef<THREE.Group, { progress: number }>(
 
   return (
     <group ref={group}>
-      <mesh
-        geometry={scaledGeometry}
-        scale={[scale, scale, scale]}
-        rotation={[Math.PI / 2, 0, 0]}
-      >
-        <meshStandardMaterial
-          color="#c8d4e0"
-          metalness={0.55}
-          roughness={0.42}
-          emissive="#1a3048"
-          emissiveIntensity={0.2}
-          flatShading={false}
-        />
-      </mesh>
+      {useStlFallback ? <OrionStlMesh /> : <OrionGlbRoot />}
     </group>
   )
-},
-)
+})
 
 function CameraRig({
   progress,
   viewMode,
   spacecraftRef,
+  curve,
+  ephemeris,
 }: {
   progress: number
   viewMode: CameraViewMode
   spacecraftRef: RefObject<THREE.Group | null>
+  curve: THREE.CatmullRomCurve3
+  ephemeris: EphemerisState
 }) {
   const { camera, controls } = useThree()
-  const curve = useMemo(() => createTrajectoryCurve(), [])
   const earthCenter = useMemo(() => new THREE.Vector3(0, 0, 0), [])
-  const moonCenter = useMemo(() => MOON_POSITION.clone(), [])
   const tmp = useMemo(
     () => ({
       pos: new THREE.Vector3(),
       tan: new THREE.Vector3(),
       cam: new THREE.Vector3(),
       tgt: new THREE.Vector3(),
+      moon: new THREE.Vector3(),
     }),
     [],
   )
@@ -139,17 +168,18 @@ function CameraRig({
     if (!c?.target) return
 
     const t = THREE.MathUtils.clamp(progress, 0, 1)
-    const { pos, tan, cam, tgt } = tmp
+    const { pos, tan, cam, tgt, moon } = tmp
     curve.getPointAt(t, pos)
     curve.getTangentAt(t, tan)
+    moon.copy(moonScenePosition(ephemeris, progress))
 
     if (viewMode === 'earth') {
       tgt.copy(earthCenter)
       cam.set(14, 10, 22)
     } else if (viewMode === 'moon') {
-      tgt.copy(moonCenter)
-      const outward = moonCenter.clone().normalize().multiplyScalar(7)
-      cam.copy(moonCenter).add(outward).add(new THREE.Vector3(0, 2.2, 0))
+      tgt.copy(moon)
+      const outward = moon.clone().lengthSq() > 1e-6 ? moon.clone().normalize().multiplyScalar(7) : new THREE.Vector3(7, 2, 0)
+      cam.copy(moon).add(outward).add(new THREE.Vector3(0, 2.2, 0))
     } else {
       if (!spacecraftRef.current) return
       spacecraftRef.current.getWorldPosition(tgt)
@@ -161,18 +191,19 @@ function CameraRig({
       cam.copy(tgt).add(back).add(side).add(new THREE.Vector3(0, 0.85, 0))
     }
 
-    c.target.lerp(tgt, 0.12)
-    camera.position.lerp(cam, 0.12)
+    c.target.lerp(tgt, 0.18)
+    camera.position.lerp(cam, 0.18)
     c.update()
   })
 
   return null
 }
 
-export function FlightScene({ progress, viewMode }: FlightSceneProps) {
-  const curve = useMemo(() => createTrajectoryCurve(), [])
-  const linePoints = useMemo(() => curve.getPoints(220), [curve])
+export function FlightScene({ progress, viewMode, ephemeris }: FlightSceneProps) {
+  const curve = ephemeris.curve
+  const linePoints = useMemo(() => curve.getPoints(280), [curve])
   const spacecraftRef = useRef<THREE.Group>(null)
+  const useStlFallback = ephemeris.status === 'error' || ephemeris.status === 'demo'
 
   return (
     <>
@@ -184,7 +215,7 @@ export function FlightScene({ progress, viewMode }: FlightSceneProps) {
       <Stars radius={420} depth={80} count={9000} factor={3.2} saturation={0} fade speed={0.12} />
       <Suspense fallback={null}>
         <EarthBody />
-        <MoonBody />
+        <MoonBody ephemeris={ephemeris} progress={progress} />
       </Suspense>
       <Line
         points={linePoints}
@@ -194,14 +225,26 @@ export function FlightScene({ progress, viewMode }: FlightSceneProps) {
         opacity={0.9}
       />
       <Suspense fallback={null}>
-        <OrionSpacecraft ref={spacecraftRef} progress={progress} />
+        <OrionSpacecraft
+          ref={spacecraftRef}
+          progress={progress}
+          curve={curve}
+          useStlFallback={useStlFallback}
+        />
       </Suspense>
-      <CameraRig progress={progress} viewMode={viewMode} spacecraftRef={spacecraftRef} />
+      <CameraRig
+        progress={progress}
+        viewMode={viewMode}
+        spacecraftRef={spacecraftRef}
+        curve={curve}
+        ephemeris={ephemeris}
+      />
       <OrbitControls
+        makeDefault
         enableDamping
         dampingFactor={0.05}
-        minDistance={4}
-        maxDistance={120}
+        minDistance={2}
+        maxDistance={180}
         maxPolarAngle={Math.PI * 0.95}
       />
     </>
