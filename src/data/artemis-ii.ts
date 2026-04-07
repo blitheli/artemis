@@ -1,5 +1,22 @@
 import * as THREE from 'three'
 
+/**
+ * NASA 公开资源（GitHub 镜像 NASA-3D-Resources）与 Artemis II 任务信息。
+ * 本页轨迹仍为示意 Catmull-Rom 曲线；精密星历见 NASA 任务页与 JPL Horizons 等工具。
+ */
+export const NASA_ARTEMIS_II_MISSION_URL =
+  'https://www.nasa.gov/humans-in-space/artemis-ii/'
+
+/** 猎户座舱体 3D 打印模型（STL），在场景中按包围盒归一化缩放 */
+export const NASA_ORION_STL_URL =
+  'https://raw.githubusercontent.com/nasa/NASA-3D-Resources/master/3D%20Printing/Orion%20Capsule/Orion%20Capsule%20(plug).stl'
+
+export const NASA_EARTH_TEXTURE_URL =
+  'https://raw.githubusercontent.com/nasa/NASA-3D-Resources/master/Images%20and%20Textures/Earth%20(A)/Earth%20(A).jpg'
+
+export const NASA_MOON_TEXTURE_URL =
+  'https://raw.githubusercontent.com/nasa/NASA-3D-Resources/master/Images%20and%20Textures/Moon/Moon.jpg'
+
 /** 任务阶段（时间为归一化 0–1，用于演示时间轴，非真实秒级） */
 export type MissionPhase = {
   id: string
